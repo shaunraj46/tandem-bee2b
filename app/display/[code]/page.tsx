@@ -17,12 +17,15 @@ export default function DisplayCodePage() {
     loadEvent();
     loadParticipants();
 
+    if (!event?.id) return;
+
     const channel = supabase
       .channel(`display-${eventCode}`)
       .on('postgres_changes', {
         event: '*',
         schema: 'public',
-        table: 'participants'
+        table: 'participants',
+        filter: `event_id=eq.${event.id}`
       }, () => {
         loadParticipants();
       })
@@ -31,7 +34,7 @@ export default function DisplayCodePage() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [eventCode]);
+  }, [eventCode, event?.id]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {

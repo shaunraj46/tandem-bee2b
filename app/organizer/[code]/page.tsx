@@ -19,12 +19,15 @@ export default function OrganizerDashboard() {
     loadEvent();
     loadParticipants();
 
+    if (!event?.id) return;
+
     const channel = supabase
       .channel(`event-${eventCode}`)
       .on('postgres_changes', {
         event: '*',
         schema: 'public',
-        table: 'participants'
+        table: 'participants',
+        filter: `event_id=eq.${event.id}`
       }, () => {
         loadParticipants();
       })
@@ -33,30 +36,59 @@ export default function OrganizerDashboard() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [eventCode]);
+  }, [eventCode, event?.id]);
 
   const loadEvent = async () => {
-    const { data } = await supabase
-      .from('events')
-      .select('*')
-      .eq('code', eventCode)
-      .single();
-    setEvent(data);
+    try {
+      console.log('Loading event with code:', eventCode);
+      const { data, error } = await supabase
+        .from('events')
+        .select('*')
+        .eq('code', eventCode)
+        .single();
+
+      if (error) {
+        console.error('Error loading event:', error);
+        alert(`Failed to load event: ${error.message}`);
+        return;
+      }
+
+      console.log('Event loaded:', data);
+      setEvent(data);
+    } catch (error) {
+      console.error('Exception loading event:', error);
+    }
   };
 
   const loadParticipants = async () => {
-    const { data: eventData } = await supabase
-      .from('events')
-      .select('id')
-      .eq('code', eventCode)
-      .single();
+    try {
+      const { data: eventData, error: eventError } = await supabase
+        .from('events')
+        .select('id')
+        .eq('code', eventCode)
+        .single();
 
-    if (eventData) {
-      const { data } = await supabase
-        .from('participants')
-        .select('*')
-        .eq('event_id', eventData.id);
-      setParticipants(data || []);
+      if (eventError) {
+        console.error('Error loading event for participants:', eventError);
+        return;
+      }
+
+      if (eventData) {
+        const { data, error } = await supabase
+          .from('participants')
+          .select('*')
+          .eq('event_id', eventData.id);
+
+        if (error) {
+          console.error('Error loading participants:', error);
+          return;
+        }
+
+        console.log('Participants loaded:', data);
+        setParticipants(data || []);
+      }
+    } catch (error) {
+      console.error('Exception loading participants:', error);
     }
   };
 
@@ -73,44 +105,56 @@ export default function OrganizerDashboard() {
     }
   };
 
-  const startRound = async () => {
-    setLoading(true);
-    try {
-      const roundRes = await fetch('/api/rounds/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          event_id: event.id,
-          group_size: groupSize,
-          minutes_per_round: minutesPerRound
-        })
-      });
-      
-      const roundData = await roundRes.json();
-      
-      if (!roundData.success || !roundData.round) {
-        throw new Error(roundData.error || 'Failed to create round');
-      }
+const startRound = async () => {
+  setLoading(true);
+  try {
+    const roundRes = await fetch('/api/rounds/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        event_id: event.id,
+        group_size: groupSize,
+        minutes_per_round: minutesPerRound
+      })
+    });
 
-      await fetch('/api/rounds/match', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          round_id: roundData.round.id,
-          event_id: event.id,
-          group_size: groupSize
-        })
-      });
+    const roundData = await roundRes.json();
 
-      setShowRoundSettings(false);
-      loadEvent();
-    } catch (error) {
-      console.error('Error starting round:', error);
-      alert('Failed to start round. Please try again.');
-    } finally {
-      setLoading(false);
+    if (!roundData.success || !roundData.round) {
+      throw new Error(roundData.error || 'Failed to create round');
     }
-  };
+
+    const matchRes = await fetch('/api/rounds/match', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        round_id: roundData.round.id,
+        event_id: event.id,
+        group_size: groupSize
+      })
+    });
+
+    const matchData = await matchRes.json();
+
+    if (!matchData.success) {
+      // Rollback: delete the round we just created
+      await supabase
+        .from('rounds')
+        .delete()
+        .eq('id', roundData.round.id);
+
+      throw new Error(matchData.error || 'Failed to create groups');
+    }
+
+    setShowRoundSettings(false);
+    loadEvent();
+  } catch (error) {
+    console.error('Error starting round:', error);
+    alert('Failed to start round. Please try again.');
+  } finally {
+    setLoading(false);
+  }
+};
 
   const openDisplayCode = () => {
     window.open(`/display/${eventCode}`, '_blank');

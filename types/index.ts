@@ -5,7 +5,7 @@ export interface Event {
   date: string;
   rounds: number;
   minutes_per_round: number;
-  group_size: 4 | 6;
+  group_size: number;
   status: 'lobby' | 'active' | 'ended';
   current_round: number;
   organizer_email: string;
@@ -29,6 +29,8 @@ export interface Round {
   id: string;
   event_id: string;
   round_number: number;
+  group_size: number;
+  minutes_per_round: number;
   started_at: string;
   ended_at?: string;
 }

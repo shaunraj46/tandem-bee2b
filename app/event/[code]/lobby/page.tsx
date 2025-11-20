@@ -52,7 +52,7 @@ export default function LobbyPage() {
     const data = await res.json();
     if (data.success) {
       localStorage.setItem('participant_id', data.participant.id);
-      router.push(`/event/${eventCode}/round`);
+      router.push(`/event/${eventCode}/waiting`);
     }
   };
 

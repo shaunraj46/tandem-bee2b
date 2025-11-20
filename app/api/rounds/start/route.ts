@@ -16,13 +16,14 @@ export async function POST(req: NextRequest) {
     const nextRound = event.current_round + 1;
 
     const { data: round, error } = await supabase
-      .from('rounds')
-      .insert({
-        event_id,
-        round_number: nextRound,
-        group_size: group_size || 4,
-        minutes_per_round: minutes_per_round || 8
-      })
+  .from('rounds')
+  .insert({
+    event_id,
+    round_number: nextRound,
+    group_size: group_size || 4,
+    minutes_per_round: minutes_per_round || 8,
+    started_at: new Date().toISOString() // ✅ Add this!
+  })
       .select()
       .single();
 

@@ -85,13 +85,20 @@ IMPORTANT:
     const result: GroupAssignment = JSON.parse(jsonText);
 
     // Validate: check all participants are assigned
-    const assignedIds = new Set(
-      result.groups.flatMap(g => g.participant_ids)
-    );
     const allIds = new Set(participants.map(p => p.id));
+    const assignedIds = new Set(result.groups.flatMap(g => g.participant_ids));
 
-    if (assignedIds.size !== allIds.size) {
-      throw new Error('Not all participants were assigned to groups');
+    // Check if all participants are assigned
+    const missing = participants.filter(p => !assignedIds.has(p.id));
+    if (missing.length > 0) {
+      console.error('Missing participants:', missing.map(p => p.name));
+      throw new Error(`Not all participants were assigned: ${missing.length} missing`);
+    }
+
+    // Check for duplicates
+    const allAssignedIds = result.groups.flatMap(g => g.participant_ids);
+    if (allAssignedIds.length !== assignedIds.size) {
+      throw new Error('Some participants were assigned to multiple groups');
     }
 
     return result;
@@ -105,11 +112,20 @@ IMPORTANT:
 }
 
 // Fallback if LLM fails
+function shuffle<T>(array: T[]): T[] {
+  const result = [...array];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+}
+
 function fallbackGrouping(
-  participants: Participant[], 
+  participants: Participant[],
   groupSize: number
 ): GroupAssignment {
-  const shuffled = [...participants].sort(() => Math.random() - 0.5);
+  const shuffled = shuffle(participants);
   const groups: GroupAssignment['groups'] = [];
   
   for (let i = 0; i < shuffled.length; i += groupSize) {

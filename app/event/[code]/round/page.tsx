@@ -1,11 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
 export default function RoundPage() {
   const params = useParams();
+  const router = useRouter();
   const eventCode = params.code as string;
   const [event, setEvent] = useState<any>(null);
   const [currentRound, setCurrentRound] = useState<any>(null);
@@ -16,6 +17,14 @@ export default function RoundPage() {
 
   useEffect(() => {
     loadEventAndGroup();
+  }, [eventCode]);
+
+  useEffect(() => {
+    loadSavedContacts();
+  }, [currentRound, event]);
+
+  useEffect(() => {
+    if (!event?.id) return;
 
     // Subscribe to changes
     const channel = supabase
@@ -23,14 +32,16 @@ export default function RoundPage() {
       .on('postgres_changes', {
         event: '*',
         schema: 'public',
-        table: 'rounds'
+        table: 'rounds',
+        filter: `event_id=eq.${event.id}`
       }, () => {
         loadEventAndGroup();
       })
       .on('postgres_changes', {
         event: '*',
         schema: 'public',
-        table: 'events'
+        table: 'events',
+        filter: `code=eq.${eventCode}`
       }, () => {
         loadEventAndGroup();
       })
@@ -39,7 +50,7 @@ export default function RoundPage() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [eventCode]);
+  }, [eventCode, event?.id]);
 
   // Timer sync based on round start time
   useEffect(() => {
@@ -58,6 +69,21 @@ export default function RoundPage() {
     const interval = setInterval(updateTimer, 1000);
     return () => clearInterval(interval);
   }, [currentRound]);
+
+  // Auto-redirect to results when event ends
+  useEffect(() => {
+    if (!event || !currentRound) return;
+
+    const isLastRound = event.current_round === event.rounds;
+    const timerExpired = timeRemaining === 0;
+
+    if (event.status === 'ended' || (isLastRound && timerExpired)) {
+      // Wait a few seconds for drama
+      setTimeout(() => {
+        router.push(`/event/${eventCode}/results`);
+      }, 3000);
+    }
+  }, [event, currentRound, timeRemaining, eventCode, router]);
 
   const loadEventAndGroup = async () => {
     const participantId = localStorage.getItem('participant_id');
@@ -100,6 +126,21 @@ export default function RoundPage() {
 
     if (allMembers) {
       setGroupMembers(allMembers.map((m: any) => m.participants));
+    }
+  };
+
+  const loadSavedContacts = async () => {
+    const myId = localStorage.getItem('participant_id');
+    if (!myId || !currentRound) return;
+
+    const { data } = await supabase
+      .from('saves')
+      .select('to_participant_id')
+      .eq('from_participant_id', myId)
+      .eq('round_id', currentRound.id);
+
+    if (data) {
+      setSavedContacts(new Set(data.map(s => s.to_participant_id)));
     }
   };
 

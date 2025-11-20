@@ -21,17 +21,30 @@ export async function POST(req: NextRequest) {
       .eq('groups.event_id', event_id);
 
     const previousGroupMap: { [key: string]: string[] } = {};
+
+    // Group members by group_id first
+    const groupsById: { [groupId: string]: string[] } = {};
+    previousGroups?.forEach(gm => {
+      if (!groupsById[gm.group_id]) {
+        groupsById[gm.group_id] = [];
+      }
+      groupsById[gm.group_id].push(gm.participant_id);
+    });
+
+    // Now build the previousGroupMap
     previousGroups?.forEach(gm => {
       if (!previousGroupMap[gm.participant_id]) {
         previousGroupMap[gm.participant_id] = [];
       }
-      previousGroups
-        ?.filter(pg => pg.group_id === gm.group_id && pg.participant_id !== gm.participant_id)
-        .forEach(pg => {
-          if (!previousGroupMap[gm.participant_id].includes(pg.participant_id)) {
-            previousGroupMap[gm.participant_id].push(pg.participant_id);
-          }
-        });
+
+      // Add all other members from this group
+      const groupMembers = groupsById[gm.group_id] || [];
+      groupMembers.forEach(memberId => {
+        if (memberId !== gm.participant_id &&
+            !previousGroupMap[gm.participant_id].includes(memberId)) {
+          previousGroupMap[gm.participant_id].push(memberId);
+        }
+      });
     });
 
     console.log('Asking Claude to create groups...');
