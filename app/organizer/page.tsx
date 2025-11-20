@@ -27,6 +27,10 @@ export default function OrganizerPage() {
       const data = await res.json();
       if (data.success) {
         router.push(`/organizer/${data.event.code}`);
+      } else {
+        // YOU NEED THIS TO SEE WHY IT FAILS
+        console.error('Detailed Error:', data);
+        alert(`Error creating event: ${data.error || 'Unknown error'}`);
       }
     } catch (error) {
       console.error('Failed to create event:', error);

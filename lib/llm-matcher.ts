@@ -64,7 +64,7 @@ IMPORTANT:
 
   try {
     const message = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-3-haiku-20240307',
       max_tokens: 4000,
       messages: [{
         role: 'user',
@@ -84,18 +84,28 @@ IMPORTANT:
 
     const result: GroupAssignment = JSON.parse(jsonText);
 
-    // Validate: check all participants are assigned
-    const allIds = new Set(participants.map(p => p.id));
-    const assignedIds = new Set(result.groups.flatMap(g => g.participant_ids));
+    // ---------------------------------------------------------
+    // 🛡️ NEW VALIDATION LOGIC
+    // ---------------------------------------------------------
 
-    // Check if all participants are assigned
+    // 1. Check if everyone is assigned (Existing check)
+    const assignedIds = new Set(result.groups.flatMap(g => g.participant_ids));
     const missing = participants.filter(p => !assignedIds.has(p.id));
     if (missing.length > 0) {
-      console.error('Missing participants:', missing.map(p => p.name));
       throw new Error(`Not all participants were assigned: ${missing.length} missing`);
     }
 
-    // Check for duplicates
+    // 2. Check for oversized groups (The Fix for your issue)
+    // We allow a tolerance of +1 (e.g., if 7 people & size 3, we allow a group of 4)
+    const maxAllowedSize = groupSize + 1;
+    const hasGiantGroup = result.groups.some(g => g.participant_ids.length > maxAllowedSize);
+
+    if (hasGiantGroup) {
+      console.warn('⚠️ AI created a group that is too large. Falling back to algorithmic matching.');
+      throw new Error('Group size constraint violation'); // This triggers the catch block below
+    }
+
+    // 3. Check for duplicates (Existing check)
     const allAssignedIds = result.groups.flatMap(g => g.participant_ids);
     if (allAssignedIds.length !== assignedIds.size) {
       throw new Error('Some participants were assigned to multiple groups');
@@ -104,9 +114,8 @@ IMPORTANT:
     return result;
 
   } catch (error) {
-    console.error('LLM matching failed:', error);
-    
-    // Fallback: simple random grouping
+    console.error('LLM matching failed or rejected:', error);
+    // This ensures that if the AI fails, we ALWAYS get mathematically correct groups
     return fallbackGrouping(participants, groupSize);
   }
 }

@@ -15,7 +15,7 @@ export default function ResultsPage() {
   }, []);
 
   const loadResults = async () => {
-    const myId = localStorage.getItem('participant_id');
+    const myId = sessionStorage.getItem('participant_id');
     if (!myId) return;
 
     const { data: eventData } = await supabase

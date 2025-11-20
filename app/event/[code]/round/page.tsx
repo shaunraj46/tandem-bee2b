@@ -14,6 +14,7 @@ export default function RoundPage() {
   const [groupMembers, setGroupMembers] = useState<any[]>([]);
   const [timeRemaining, setTimeRemaining] = useState(0);
   const [savedContacts, setSavedContacts] = useState<Set<string>>(new Set());
+  const [isSittingOut, setIsSittingOut] = useState(false);
 
   useEffect(() => {
     loadEventAndGroup();
@@ -57,7 +58,15 @@ export default function RoundPage() {
     if (!currentRound || !currentRound.started_at || !currentRound.minutes_per_round) return;
 
     const updateTimer = () => {
-      const startTime = new Date(currentRound.started_at).getTime();
+      if (!currentRound?.started_at) return;
+
+      // 🟢 NEW: Force UTC interpretation
+      // If the string doesn't end in 'Z', append it so the browser knows it's UTC
+      const timeString = currentRound.started_at.endsWith('Z')
+        ? currentRound.started_at
+        : currentRound.started_at + 'Z';
+
+      const startTime = new Date(timeString).getTime();
       const now = Date.now();
       const elapsed = Math.floor((now - startTime) / 1000);
       const total = currentRound.minutes_per_round * 60;
@@ -71,23 +80,17 @@ export default function RoundPage() {
   }, [currentRound]);
 
   // Auto-redirect to results when event ends
-  useEffect(() => {
-    if (!event || !currentRound) return;
 
-    const isLastRound = event.current_round === event.rounds;
-    const timerExpired = timeRemaining === 0;
-
-    if (event.status === 'ended' || (isLastRound && timerExpired)) {
-      // Wait a few seconds for drama
-      setTimeout(() => {
-        router.push(`/event/${eventCode}/results`);
-      }, 3000);
-    }
-  }, [event, currentRound, timeRemaining, eventCode, router]);
 
   const loadEventAndGroup = async () => {
-    const participantId = localStorage.getItem('participant_id');
-    if (!participantId) return;
+    const participantId = sessionStorage.getItem('participant_id');
+
+    // 1. Safety: If browser cache is truly wiped, we CAN'T know who they are.
+    // Even Kahoot kicks you out if you manually clear cookies.
+    if (!participantId) {
+      router.push(`/event/${eventCode}/lobby`);
+      return;
+    }
 
     const { data: eventData } = await supabase
       .from('events')
@@ -109,28 +112,52 @@ export default function RoundPage() {
     const latestRound = rounds[0];
     setCurrentRound(latestRound);
 
+    // 2. CHECK: Are they a valid participant in this event?
+    const { data: participant } = await supabase
+      .from('participants')
+      .select('id')
+      .eq('id', participantId)
+      .eq('event_id', eventData.id)
+      .maybeSingle();
+
+    // If they are a valid participant, DO NOT kick them out.
+    if (participant) {
+      // Check if they have a group assignment
+      // 3. Check Group Membership
     const { data: myGroupMembership } = await supabase
       .from('group_members')
-      .select('*, groups(*)')
+      .select('*, groups!inner(*)') // 👈 !inner forces a strict match
       .eq('participant_id', participantId)
       .eq('groups.round_id', latestRound.id)
-      .single();
+      .maybeSingle();
 
-    if (!myGroupMembership) return;
-    setMyGroup(myGroupMembership.groups);
+      if (!myGroupMembership) {
+        // KAHOOT LOGIC: They are valid, just not in a group right now.
+        // Put them on the "Bench" (Waiting Screen).
+        setIsSittingOut(true);
+        return;
+      }
 
-    const { data: allMembers } = await supabase
-      .from('group_members')
-      .select('participant_id, participants(*)')
-      .eq('group_id', myGroupMembership.groups.id);
+      // If they ARE in a group, show it.
+      setIsSittingOut(false);
+      setMyGroup(myGroupMembership.groups);
 
-    if (allMembers) {
-      setGroupMembers(allMembers.map((m: any) => m.participants));
+      const { data: allMembers } = await supabase
+        .from('group_members')
+        .select('participant_id, participants(*)')
+        .eq('group_id', myGroupMembership.groups.id);
+
+      if (allMembers) {
+        setGroupMembers(allMembers.map((m: any) => m.participants));
+      }
+    } else {
+      // Only kick them out if they don't exist in the event at all.
+      router.push(`/event/${eventCode}/lobby`);
     }
   };
 
   const loadSavedContacts = async () => {
-    const myId = localStorage.getItem('participant_id');
+    const myId = sessionStorage.getItem('participant_id');
     if (!myId || !currentRound) return;
 
     const { data } = await supabase
@@ -145,7 +172,7 @@ export default function RoundPage() {
   };
 
   const toggleSaveContact = async (participantId: string) => {
-    const myId = localStorage.getItem('participant_id');
+    const myId = sessionStorage.getItem('participant_id');
     if (!myId || !event || !currentRound) return;
 
     const newSaved = new Set(savedContacts);
@@ -176,7 +203,48 @@ export default function RoundPage() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  if (!event || !myGroup || !currentRound) {
+  // Loading state - only when we truly don't have basic data
+  if (!event || !currentRound) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-pink-100 via-orange-100 to-yellow-100 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-pink-500 mx-auto mb-4"></div>
+          <p className="text-gray-600 font-medium">Loading event...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Spectator/Waiting Mode - Kahoot Style "You're on the bench"
+  if (isSittingOut) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-pink-100 via-orange-100 to-yellow-100 flex items-center justify-center p-4">
+        <div className="max-w-lg w-full text-center">
+          <div className="bg-white rounded-3xl shadow-2xl p-12">
+            <div className="text-6xl mb-6">🪑</div>
+            <h1 className="text-3xl font-bold text-gray-900 mb-4">
+              You're on the Bench
+            </h1>
+            <p className="text-lg text-gray-600 mb-6">
+              You're registered for this event, but not assigned to a group in Round {event.current_round}.
+            </p>
+            <div className="bg-gradient-to-r from-pink-50 to-orange-50 rounded-2xl p-6 mb-6">
+              <p className="text-gray-700">
+                <strong>Don't worry!</strong> Stay on this page and you'll be automatically included in the next round when the organizer starts it.
+              </p>
+            </div>
+            <div className="text-sm text-gray-500">
+              <p>Event: {event.name}</p>
+              <p>Round {event.current_round} of {event.rounds}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // If not sitting out but still no group, something went wrong
+  if (!myGroup) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-pink-100 via-orange-100 to-yellow-100 flex items-center justify-center">
         <div className="text-center">
@@ -187,7 +255,7 @@ export default function RoundPage() {
     );
   }
 
-  const myId = localStorage.getItem('participant_id');
+  const myId = sessionStorage.getItem('participant_id');
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-pink-100 via-orange-100 to-yellow-100 p-4">
