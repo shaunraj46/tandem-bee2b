@@ -3,9 +3,8 @@ import { supabase } from '@/lib/supabase';
 
 export async function POST(req: NextRequest) {
   try {
-    const { event_id } = await req.json();
+    const { event_id, group_size, minutes_per_round } = await req.json();
 
-    // Get current event
     const { data: event } = await supabase
       .from('events')
       .select('*')
@@ -16,19 +15,22 @@ export async function POST(req: NextRequest) {
 
     const nextRound = event.current_round + 1;
 
-    // Create new round
     const { data: round, error } = await supabase
       .from('rounds')
       .insert({
         event_id,
-        round_number: nextRound
+        round_number: nextRound,
+        group_size: group_size || 4,
+        minutes_per_round: minutes_per_round || 8
       })
       .select()
       .single();
 
-    if (error) throw error;
+    if (error) {
+      console.error('Error creating round:', error);
+      throw error;
+    }
 
-    // Update event
     await supabase
       .from('events')
       .update({
@@ -39,6 +41,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true, round });
   } catch (error: any) {
+    console.error('Start round error:', error);
     return NextResponse.json(
       { success: false, error: error.message },
       { status: 500 }

@@ -13,7 +13,7 @@ function generateEventCode(): string {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { name, date, rounds, minutes_per_round, group_size, organizer_email } = body;
+    const { name, date, rounds, organizer_email } = body;
 
     const code = generateEventCode();
 
@@ -24,8 +24,6 @@ export async function POST(req: NextRequest) {
         name,
         date,
         rounds: rounds || 4,
-        minutes_per_round: minutes_per_round || 8,
-        group_size: group_size || 4,
         organizer_email,
         status: 'lobby'
       })

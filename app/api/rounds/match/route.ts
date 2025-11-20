@@ -4,18 +4,8 @@ import { matchParticipantsWithLLM } from '@/lib/llm-matcher';
 
 export async function POST(req: NextRequest) {
   try {
-    const { round_id, event_id } = await req.json();
+    const { round_id, event_id, group_size } = await req.json();
 
-    // Get event details
-    const { data: event } = await supabase
-      .from('events')
-      .select('*')
-      .eq('id', event_id)
-      .single();
-
-    if (!event) throw new Error('Event not found');
-
-    // Get all participants
     const { data: participants } = await supabase
       .from('participants')
       .select('*')
@@ -25,7 +15,6 @@ export async function POST(req: NextRequest) {
       throw new Error('No participants found');
     }
 
-    // Get previous groupings to avoid repeats
     const { data: previousGroups } = await supabase
       .from('group_members')
       .select('participant_id, group_id, groups!inner(round_id)')
@@ -36,7 +25,6 @@ export async function POST(req: NextRequest) {
       if (!previousGroupMap[gm.participant_id]) {
         previousGroupMap[gm.participant_id] = [];
       }
-      // Store IDs of people they've been grouped with
       previousGroups
         ?.filter(pg => pg.group_id === gm.group_id && pg.participant_id !== gm.participant_id)
         .forEach(pg => {
@@ -46,15 +34,13 @@ export async function POST(req: NextRequest) {
         });
     });
 
-    // 🤖 Use LLM to create optimal groups
-    console.log('🤖 Asking Claude to create groups...');
+    console.log('Asking Claude to create groups...');
     const groupAssignment = await matchParticipantsWithLLM(
       participants,
-      event.group_size,
+      group_size || 4,
       previousGroupMap
     );
 
-    // Save groups to database
     for (const group of groupAssignment.groups) {
       const { data: groupData, error: groupError } = await supabase
         .from('groups')
@@ -69,7 +55,6 @@ export async function POST(req: NextRequest) {
 
       if (groupError) throw groupError;
 
-      // Add members
       const members = group.participant_ids.map(participant_id => ({
         group_id: groupData.id,
         participant_id
